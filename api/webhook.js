@@ -1,25 +1,50 @@
 const axios = require('axios');
+const crypto = require('crypto');
 
-const HUBSPOT_TOKEN = process.env.HUBSPOT_TOKEN; // pulled from Vercel settings
+const HUBSPOT_TOKEN = process.env.HUBSPOT_TOKEN;
+const ELEVENLABS_SECRET = process.env.ELEVENLABS_SECRET;
 
 export default async function handler(req, res) {
 
-  // Only accept POST requests from ElevenLabs
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const { transcript, metadata, call_duration } = req.body;
 
-    // Get the caller's phone number (comes from Twilio via ElevenLabs)
+    // ── STEP 1: Verify HMAC signature from ElevenLabs ──
+    const signature = req.headers['elevenlabs-signature'];
+
+    if (!signature) {
+      return res.status(401).json({ error: 'No signature found' });
+    }
+
+    // Extract timestamp and hash from signature header
+    const parts = signature.split(',');
+    const timestamp = parts[0].replace('t=', '');
+    const receivedHash = parts[1].replace('v0=', '');
+
+    // Recreate the expected hash
+    const payload = `${timestamp}.${JSON.stringify(req.body)}`;
+    const expectedHash = crypto
+      .createHmac('sha256', ELEVENLABS_SECRET)
+      .update(payload)
+      .digest('hex');
+
+    // Compare — reject if they don't match
+    if (receivedHash !== expectedHash) {
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+
+    // ── STEP 2: Get data from ElevenLabs ──
+    const { transcript, metadata, call_duration } = req.body;
     const callerPhone = metadata?.twilio?.from;
 
     if (!callerPhone) {
       return res.status(400).json({ error: 'No phone number found' });
     }
 
-    // ── STEP 1: Find contact in HubSpot by phone number ──
+    // ── STEP 3: Find contact in HubSpot by phone number ──
     const searchRes = await axios.post(
       'https://api.hubapi.com/crm/v3/objects/contacts/search',
       {
@@ -37,11 +62,9 @@ export default async function handler(req, res) {
     let contactId;
 
     if (searchRes.data.results.length > 0) {
-      // Contact already exists → use their ID
       contactId = searchRes.data.results[0].id;
-
     } else {
-      // Contact doesn't exist → create them automatically
+      // Create new contact if doesn't exist
       const createRes = await axios.post(
         'https://api.hubapi.com/crm/v3/objects/contacts',
         {
@@ -56,24 +79,21 @@ export default async function handler(req, res) {
       contactId = createRes.data.id;
     }
 
-    // ── STEP 2: Log the call + transcript on that contact ──
+    // ── STEP 4: Log transcript as a Note on the contact ──
     await axios.post(
-      'https://api.hubapi.com/engagements/v1/engagements',
+      'https://api.hubapi.com/crm/v3/objects/notes',
       {
-        engagement: {
-          type: 'CALL',
-          active: false,
-          timestamp: Date.now()
+        properties: {
+          hs_note_body: `📞 ElevenLabs Call\nDuration: ${call_duration}s\n\nTranscript:\n${transcript}`,
+          hs_timestamp: Date.now().toString()
         },
-        associations: {
-          contactIds: [contactId]
-        },
-        metadata: {
-          body: transcript,
-          durationMilliseconds: call_duration * 1000,
-          status: 'COMPLETED',
-          direction: 'OUTBOUND'
-        }
+        associations: [{
+          to: { id: contactId },
+          types: [{
+            associationCategory: 'HUBSPOT_DEFINED',
+            associationTypeId: 202
+          }]
+        }]
       },
       { headers: { Authorization: `Bearer ${HUBSPOT_TOKEN}` } }
     );
