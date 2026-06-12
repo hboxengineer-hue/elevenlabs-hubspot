@@ -8,17 +8,15 @@ module.exports = async function handler(req, res) {
 
   try {
     const webhookData = req.body.data;
-    console.log('FULL PAYLOAD:', JSON.stringify(req.body, null, 2));
     if (!webhookData) {
       return res.status(400).json({ error: 'Missing payload data object' });
     }
 
     const { transcript, metadata, analysis } = webhookData;
 
-    // ── Phone number ──
-    const callerPhone =
-      metadata?.phone_call?.external_number ||
-      metadata?.twilio?.from;
+    // ── Phone number (correct path from real payload) ──
+    const callerPhone = webhookData.user_id ||
+      metadata?.phone_call?.external_number;
 
     const callDuration = metadata?.call_duration_secs || 0;
 
@@ -26,25 +24,23 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'No phone number found' });
     }
 
-    // ── Data Collection points from ElevenLabs Analysis ──
-    const dataCollection = analysis?.data_collection || {};
-    const contactName   = dataCollection?.contact_name?.value   || '';
-    const contactEmail  = dataCollection?.contact_email?.value  || '';
-    const businessName  = dataCollection?.business_name?.value  || '';
-    const businessType  = dataCollection?.business_type?.value  || '';
-    const demoScheduled = dataCollection?.demo_scheduled?.value === true || 
+    // ── Data Collection (correct key: data_collection_results) ──
+    const dataCollection = analysis?.data_collection_results || {};
+    const contactName  = dataCollection?.contact_name?.value  || '';
+    const contactEmail = dataCollection?.contact_email?.value || '';
+    const businessName = dataCollection?.business_name?.value || '';
+    const businessType = dataCollection?.business_type?.value || '';
+    const demoScheduled = dataCollection?.demo_scheduled?.value === true ||
                           String(dataCollection?.demo_scheduled?.value).toLowerCase() === 'true';
-    const infoEmailSent = dataCollection?.information_email_sent?.value === true || 
+    const infoEmailSent = dataCollection?.information_email_sent?.value === true ||
                           String(dataCollection?.information_email_sent?.value).toLowerCase() === 'true';
 
-    // ── Evaluation Criteria results ──
-    const evaluations   = analysis?.evaluation_criteria || {};
-    const leadQualified = evaluations?.Lead_Qualified?.result === 'success' ||
-                          evaluations?.lead_qualified?.result === 'success';
-    const callEndedGracefully = evaluations?.Call_Ended_Gracefully?.result === 'success' ||
-                                evaluations?.call_ended_gracefully?.result === 'success';
+    // ── Evaluation Criteria (correct key: evaluation_criteria_results) ──
+    const evaluations = analysis?.evaluation_criteria_results || {};
+    const leadQualified = evaluations?.lead_qualified?.result === 'success';
+    const callEndedGracefully = evaluations?.call_ended_gracefully?.result === 'success';
 
-    // ── Split contact_name into first/last ──
+    // ── Split name into first/last ──
     const nameParts = contactName.trim().split(' ');
     const firstName = nameParts[0] || 'Unknown';
     const lastName  = nameParts.slice(1).join(' ') || 'Caller';
@@ -66,21 +62,19 @@ module.exports = async function handler(req, res) {
 
     let contactId;
 
-    // Build contact properties to update
     const contactProperties = {
       phone: callerPhone,
-      ...(firstName && { firstname: firstName }),
-      ...(lastName  && { lastname: lastName }),
-      ...(contactEmail  && { email: contactEmail }),
-      ...(businessName  && { business_name: businessName }),
-      ...(businessType  && { business_type: businessType }),
-      ...(demoScheduled !== undefined && { demo_scheduled: demoScheduled }),
-      ...(infoEmailSent !== undefined && { information_email_sent: infoEmailSent }),
-      ...(leadQualified !== undefined && { lead_qualified: leadQualified }),
+      ...(firstName    && { firstname: firstName }),
+      ...(lastName     && { lastname: lastName }),
+      ...(contactEmail && { email: contactEmail }),
+      ...(businessName && { business_name: businessName }),
+      ...(businessType && { business_type: businessType }),
+      demo_scheduled: demoScheduled,
+      information_email_sent: infoEmailSent,
+      lead_qualified: leadQualified,
     };
 
     if (searchRes.data.results.length > 0) {
-      // Contact exists → update their properties
       contactId = searchRes.data.results[0].id;
       await axios.patch(
         `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}`,
@@ -88,7 +82,6 @@ module.exports = async function handler(req, res) {
         { headers: { Authorization: `Bearer ${HUBSPOT_TOKEN}` } }
       );
     } else {
-      // Contact doesn't exist → create with all properties
       const createRes = await axios.post(
         'https://api.hubapi.com/crm/v3/objects/contacts',
         { properties: contactProperties },
@@ -101,11 +94,12 @@ module.exports = async function handler(req, res) {
     let readableTranscript = 'No transcript recorded.';
     if (Array.isArray(transcript)) {
       readableTranscript = transcript
+        .filter(turn => turn.message && turn.message !== '...')
         .map(turn => `${turn.role === 'agent' ? 'AI Assistant' : 'Caller'}: ${turn.message}`)
         .join('\n');
     }
 
-    // ── Build evaluation summary ──
+    // ── Evaluation summary ──
     const evalSummary = [
       `✅ Lead Qualified:         ${leadQualified ? 'Yes' : 'No'}`,
       `📅 Demo Scheduled:         ${demoScheduled ? 'Yes' : 'No'}`,
