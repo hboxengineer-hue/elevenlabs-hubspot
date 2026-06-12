@@ -8,6 +8,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const webhookData = req.body.data;
+    console.log('FULL PAYLOAD:', JSON.stringify(req.body, null, 2));
     if (!webhookData) {
       return res.status(400).json({ error: 'Missing payload data object' });
     }
