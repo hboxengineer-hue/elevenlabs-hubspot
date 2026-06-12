@@ -14,7 +14,7 @@ module.exports = async function handler(req, res) {
 
     const { transcript, metadata, analysis } = webhookData;
 
-    // ── Phone number (correct path from real payload) ──
+    // ── Phone number ──
     const callerPhone = webhookData.user_id ||
       metadata?.phone_call?.external_number;
 
@@ -24,7 +24,7 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'No phone number found' });
     }
 
-    // ── Data Collection (correct key: data_collection_results) ──
+    // ── Data Collection ──
     const dataCollection = analysis?.data_collection_results || {};
     const contactName  = dataCollection?.contact_name?.value  || '';
     const contactEmail = dataCollection?.contact_email?.value || '';
@@ -35,7 +35,7 @@ module.exports = async function handler(req, res) {
     const infoEmailSent = dataCollection?.information_email_sent?.value === true ||
                           String(dataCollection?.information_email_sent?.value).toLowerCase() === 'true';
 
-    // ── Evaluation Criteria (correct key: evaluation_criteria_results) ──
+    // ── Evaluation Criteria ──
     const evaluations = analysis?.evaluation_criteria_results || {};
     const leadQualified = evaluations?.lead_qualified?.result === 'success';
     const callEndedGracefully = evaluations?.call_ended_gracefully?.result === 'success';
@@ -45,27 +45,11 @@ module.exports = async function handler(req, res) {
     const firstName = nameParts[0] || 'Unknown';
     const lastName  = nameParts.slice(1).join(' ') || 'Caller';
 
-    // ── Find or create contact in HubSpot ──
-    const searchRes = await axios.post(
-      'https://api.hubapi.com/crm/v3/objects/contacts/search',
-      {
-        filterGroups: [{
-          filters: [{
-            propertyName: 'phone',
-            operator: 'EQ',
-            value: callerPhone
-          }]
-        }]
-      },
-      { headers: { Authorization: `Bearer ${HUBSPOT_TOKEN}` } }
-    );
-
-    let contactId;
-
+    // ── Contact properties ──
     const contactProperties = {
       phone: callerPhone,
-      ...(firstName    && { firstname: firstName }),
-      ...(lastName     && { lastname: lastName }),
+      firstname: firstName,
+      lastname: lastName,
       ...(contactEmail && { email: contactEmail }),
       ...(businessName && { business_name: businessName }),
       ...(businessType && { business_type: businessType }),
@@ -74,21 +58,13 @@ module.exports = async function handler(req, res) {
       lead_qualified: leadQualified,
     };
 
-    if (searchRes.data.results.length > 0) {
-      contactId = searchRes.data.results[0].id;
-      await axios.patch(
-        `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}`,
-        { properties: contactProperties },
-        { headers: { Authorization: `Bearer ${HUBSPOT_TOKEN}` } }
-      );
-    } else {
-      const createRes = await axios.post(
-        'https://api.hubapi.com/crm/v3/objects/contacts',
-        { properties: contactProperties },
-        { headers: { Authorization: `Bearer ${HUBSPOT_TOKEN}` } }
-      );
-      contactId = createRes.data.id;
-    }
+    // ── Always create a new contact ──
+    const createRes = await axios.post(
+      'https://api.hubapi.com/crm/v3/objects/contacts',
+      { properties: contactProperties },
+      { headers: { Authorization: `Bearer ${HUBSPOT_TOKEN}` } }
+    );
+    const contactId = createRes.data.id;
 
     // ── Format transcript ──
     let readableTranscript = 'No transcript recorded.';
