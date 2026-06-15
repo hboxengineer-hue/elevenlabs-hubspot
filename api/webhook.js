@@ -30,6 +30,7 @@ module.exports = async function handler(req, res) {
     const contactEmail = dataCollection?.contact_email?.value || '';
     const businessName = dataCollection?.business_name?.value || '';
     const businessType = dataCollection?.business_type?.value || '';
+    const statusFromCall = dataCollection?.Status_from_call?.value || '';
     const demoScheduled = dataCollection?.demo_scheduled?.value === true ||
                           String(dataCollection?.demo_scheduled?.value).toLowerCase() === 'true';
     const infoEmailSent = dataCollection?.information_email_sent?.value === true ||
@@ -39,6 +40,7 @@ module.exports = async function handler(req, res) {
     const evaluations = analysis?.evaluation_criteria_results || {};
     const leadQualified = evaluations?.lead_qualified?.result === 'success';
     const callEndedGracefully = evaluations?.call_ended_gracefully?.result === 'success';
+    const informationEmailOptIn = evaluations?.information_email_opt_in?.result === 'success';
 
     // ── Split name into first/last ──
     const nameParts = contactName.trim().split(' ');
@@ -50,12 +52,15 @@ module.exports = async function handler(req, res) {
       phone: callerPhone,
       firstname: firstName,
       lastname: lastName,
-      ...(contactEmail && { email: contactEmail }),
-      ...(businessName && { business_name: businessName }),
-      ...(businessType && { business_type: businessType }),
+      ...(contactEmail   && { email: contactEmail }),
+      ...(businessName   && { business_name: businessName }),
+      ...(businessType   && { business_type: businessType }),
+      ...(statusFromCall && { status_from_call: statusFromCall }),
       demo_scheduled: demoScheduled,
       information_email_sent: infoEmailSent,
       lead_qualified: leadQualified,
+      call_ended_gracefully: callEndedGracefully,
+      information_email_opt_in: informationEmailOptIn,
     };
 
     // ── Always create a new contact ──
@@ -77,10 +82,12 @@ module.exports = async function handler(req, res) {
 
     // ── Evaluation summary ──
     const evalSummary = [
-      `✅ Lead Qualified:         ${leadQualified ? 'Yes' : 'No'}`,
-      `📅 Demo Scheduled:         ${demoScheduled ? 'Yes' : 'No'}`,
-      `📧 Info Email Opted In:    ${infoEmailSent ? 'Yes' : 'No'}`,
-      `📞 Call Ended Gracefully:  ${callEndedGracefully ? 'Yes' : 'No'}`,
+      `✅ Lead Qualified:           ${leadQualified ? 'Yes' : 'No'}`,
+      `📅 Demo Scheduled:           ${demoScheduled ? 'Yes' : 'No'}`,
+      `📧 Info Email Opted In:      ${informationEmailOptIn ? 'Yes' : 'No'}`,
+      `📩 Info Email Sent:          ${infoEmailSent ? 'Yes' : 'No'}`,
+      `📞 Call Ended Gracefully:    ${callEndedGracefully ? 'Yes' : 'No'}`,
+      `📋 Status From Call:         ${statusFromCall || 'Unknown'}`,
     ].join('\n');
 
     // ── Log Note on contact ──
@@ -94,6 +101,7 @@ module.exports = async function handler(req, res) {
             `Contact: ${contactName || 'Unknown'}`,
             `Business: ${businessName || 'Unknown'} (${businessType || 'Unknown'})`,
             `Email: ${contactEmail || 'Not provided'}`,
+            `Status: ${statusFromCall || 'Unknown'}`,
             ``,
             `── Evaluation Results ──`,
             evalSummary,
