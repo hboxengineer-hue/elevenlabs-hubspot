@@ -1,3 +1,4 @@
+// restoring at same postion 
 const axios = require('axios');
 const HUBSPOT_TOKEN = process.env.HUBSPOT_TOKEN;
 
@@ -26,15 +27,15 @@ module.exports = async function handler(req, res) {
 
     // ── Data Collection ──
     const dataCollection = analysis?.data_collection_results || {};
-    const contactName  = dataCollection?.contact_name?.value  || '';
+    const contactName = dataCollection?.contact_name?.value || '';
     const contactEmail = dataCollection?.contact_email?.value || '';
     const businessName = dataCollection?.business_name?.value || '';
     const businessType = dataCollection?.business_type?.value || '';
     const statusFromCall = dataCollection?.Status_from_call?.value || '';
     const demoScheduled = dataCollection?.demo_scheduled?.value === true ||
-                          String(dataCollection?.demo_scheduled?.value).toLowerCase() === 'true';
+      String(dataCollection?.demo_scheduled?.value).toLowerCase() === 'true';
     const infoEmailSent = dataCollection?.information_email_sent?.value === true ||
-                          String(dataCollection?.information_email_sent?.value).toLowerCase() === 'true';
+      String(dataCollection?.information_email_sent?.value).toLowerCase() === 'true';
 
     // ── Evaluation Criteria ──
     const evaluations = analysis?.evaluation_criteria_results || {};
@@ -45,16 +46,16 @@ module.exports = async function handler(req, res) {
     // ── Split name into first/last ──
     const nameParts = contactName.trim().split(' ');
     const firstName = nameParts[0] || 'Unknown';
-    const lastName  = nameParts.slice(1).join(' ') || 'Caller';
+    const lastName = nameParts.slice(1).join(' ') || 'Caller';
 
     // ── Contact properties ──
     const contactProperties = {
       phone: callerPhone,
       firstname: firstName,
       lastname: lastName,
-      ...(contactEmail   && { email: contactEmail }),
-      ...(businessName   && { business_name: businessName }),
-      ...(businessType   && { business_type: businessType }),
+      ...(contactEmail && { email: contactEmail }),
+      ...(businessName && { business_name: businessName }),
+      ...(businessType && { business_type: businessType }),
       ...(statusFromCall && { status_from_call: statusFromCall }),
       demo_scheduled: demoScheduled,
       information_email_sent: infoEmailSent,
